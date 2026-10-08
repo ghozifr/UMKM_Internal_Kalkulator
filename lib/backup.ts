@@ -1,26 +1,28 @@
-import { LEVEL_LABEL, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
+import { LEVELS, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
+import { nomorTerbesar } from "./kode";
+import type { Data, Seq } from "./data";
 
-export type Data = { opsi: Opsi[]; trx: Transaksi[]; turunan: Turunan[]; seq: number };
-
-const LEVELS = Object.keys(LEVEL_LABEL) as Level[];
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
-const noKode = (k: string) => Number(k.slice(4)) || 0;
-const kodeDari = (n: number) => `TRX-${String(n).padStart(4, "0")}`;
 
-/* Format ringkas: baris disimpan sebagai array (tanpa nama kolom berulang), lalu dikompres gzip. */
+/* Format ringkas: baris disimpan sebagai array (tanpa nama kolom berulang), lalu dikompres gzip.
+   v2 menambah singkatan kode, id pilihan pada transaksi, dan nomor urut per awalan kode.
+   File v1 (versi lama) tetap bisa dibaca. */
 const pack = (d: Data) =>
   JSON.stringify({
-    v: 1,
-    o: d.opsi.map((o) => [o.id, o.level, o.nama, o.parentId ?? "", o.tipe ?? ""]),
-    t: d.trx.map((t) => [t.id, t.kode, t.tanggal, t.tipe === "masuk" ? 1 : 0, t.akun, t.subAkun, t.kas, t.ket1, t.ket2, t.ket3, t.jumlah, t.harga]),
+    v: 2,
+    o: d.opsi.map((o) => [o.id, o.level, o.nama, o.parentId ?? "", o.tipe ?? "", o.kode ?? ""]),
+    t: d.trx.map((t) => [
+      t.id, t.kode, t.tanggal, t.tipe === "masuk" ? 1 : 0, t.akun, t.subAkun, t.kas, t.ket1, t.ket2, t.ket3,
+      t.jumlah, t.harga, t.aid ?? "", t.sid ?? "", t.kid ?? "", t.k1id ?? "",
+    ]),
     d: d.turunan.map((x) => [x.id, x.nama, x.kodes]),
     s: d.seq,
   });
 
 function unpack(raw: unknown): Data {
   const r = raw as { v?: number; o?: unknown; t?: unknown; d?: unknown; s?: unknown } | null;
-  if (!r || r.v !== 1 || !Array.isArray(r.o) || !Array.isArray(r.t) || !Array.isArray(r.d))
+  if (!r || (r.v !== 1 && r.v !== 2) || !Array.isArray(r.o) || !Array.isArray(r.t) || !Array.isArray(r.d))
     throw new Error("Format file tidak dikenali. Gunakan file cadangan dari aplikasi ini.");
 
   const opsi: Opsi[] = [];
@@ -29,23 +31,34 @@ function unpack(raw: unknown): Data {
     opsi.push({
       id: str(a[0]), level: a[1] as Level, nama: str(a[2]), parentId: str(a[3]) || undefined,
       tipe: a[4] === "masuk" || a[4] === "keluar" ? (a[4] as Tipe) : undefined,
+      kode: str(a[5], 6) || undefined,
     });
   }
+
+  // Id pilihan: ada di v2 (kosong = sudah dihapus); tidak ada di v1 (dicocokkan lewat nama saat dirapikan).
+  const opt = (a: unknown[], i: number) => (a.length > i ? str(a[i]) : undefined);
   const trx: Transaksi[] = [];
   for (const a of r.t as unknown[][]) {
-    if (!Array.isArray(a) || !str(a[0]) || !str(a[1], 30) || !/^\d{4}-\d{2}-\d{2}$/.test(str(a[2]))) continue;
+    if (!Array.isArray(a) || !str(a[0]) || !str(a[1], 40) || !/^\d{4}-\d{2}-\d{2}$/.test(str(a[2]))) continue;
     trx.push({
-      id: str(a[0]), kode: str(a[1], 30), tanggal: a[2] as string, tipe: a[3] === 1 ? "masuk" : "keluar",
+      id: str(a[0]), kode: str(a[1], 40), tanggal: a[2] as string, tipe: a[3] === 1 ? "masuk" : "keluar",
       akun: str(a[4]), subAkun: str(a[5]), kas: str(a[6]), ket1: str(a[7]), ket2: str(a[8]), ket3: str(a[9]),
       jumlah: num(a[10]), harga: num(a[11]),
+      aid: opt(a, 12), sid: opt(a, 13), kid: opt(a, 14), k1id: opt(a, 15),
     });
   }
+
   const turunan: Turunan[] = [];
   for (const a of r.d as unknown[][]) {
     if (!Array.isArray(a) || !str(a[0]) || !Array.isArray(a[2])) continue;
-    turunan.push({ id: str(a[0]), nama: str(a[1]) || "Tanpa Nama", kodes: (a[2] as unknown[]).map((k) => str(k, 30)).filter(Boolean) });
+    turunan.push({ id: str(a[0]), nama: str(a[1]) || "Tanpa Nama", kodes: (a[2] as unknown[]).map((k) => str(k, 40)).filter(Boolean) });
   }
-  return { opsi, trx, turunan, seq: trx.reduce((m, t) => Math.max(m, noKode(t.kode)), num(r.s)) };
+
+  const seq: Seq = {};
+  if (r.v === 2 && r.s && typeof r.s === "object")
+    for (const [k, v] of Object.entries(r.s as Record<string, unknown>)) if (num(v) > 0) seq[str(k, 40)] = num(v);
+  for (const [k, v] of nomorTerbesar(trx)) seq[k] = Math.max(seq[k] ?? 0, v);
+  return { opsi, trx, turunan, seq };
 }
 
 async function gunzip(buf: Uint8Array): Promise<string> {
@@ -89,39 +102,5 @@ export async function bacaFile(file: File): Promise<Data> {
   return unpack(json);
 }
 
-/* Gabungkan data masuk ke data sekarang tanpa menimpa. Kode yang bentrok diberi nomor baru
-   dan rujukan Tabel Turunan ikut disesuaikan. */
-export function gabung(cur: Data, inc: Data): Data {
-  const key = (o: Opsi) => `${o.level}|${o.parentId ?? ""}|${o.nama.toLowerCase()}`;
-  const opsi = [...cur.opsi];
-  const oIds = new Set(opsi.map((o) => o.id));
-  const oKeys = new Map(opsi.map((o) => [key(o), o.id]));
-  const idMap = new Map<string, string>();
-  for (const o of inc.opsi) {
-    const c = { ...o, parentId: o.parentId ? idMap.get(o.parentId) ?? o.parentId : undefined };
-    const sama = oKeys.get(key(c));
-    if (sama) { idMap.set(o.id, sama); continue; }
-    if (oIds.has(o.id)) continue;
-    opsi.push(c); oIds.add(c.id); oKeys.set(key(c), c.id);
-  }
-
-  const tIds = new Set(cur.trx.map((t) => t.id));
-  const kodes = new Set(cur.trx.map((t) => t.kode));
-  const peta = new Map<string, string>();
-  let seq = Math.max(cur.seq, inc.seq);
-  const baru: Transaksi[] = [];
-  for (const t of inc.trx) {
-    if (tIds.has(t.id)) continue;
-    let kode = t.kode;
-    if (kodes.has(kode)) { kode = kodeDari(++seq); peta.set(t.kode, kode); }
-    kodes.add(kode);
-    baru.push({ ...t, kode });
-  }
-
-  const dIds = new Set(cur.turunan.map((x) => x.id));
-  const turunan = [
-    ...cur.turunan,
-    ...inc.turunan.filter((x) => !dIds.has(x.id)).map((x) => ({ ...x, kodes: x.kodes.map((k) => peta.get(k) ?? k) })),
-  ];
-  return { opsi, trx: [...baru, ...cur.trx], turunan, seq };
-}
+// Dipakai untuk uji di luar browser.
+export const _uji = { pack, unpack };
