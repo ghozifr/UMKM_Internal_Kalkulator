@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
-import { useLocal } from "./useLocal";
+import type { Dispatch, SetStateAction } from "react";
 import { hitung } from "./format";
-import { BERKODE, SEED, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
+import { BERKODE, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
 import { formatKode, nomorTerbesar, prefixKode, singkat } from "./kode";
 import {
   daftar, gabung, hapusCascade, indeks, newId, rapikan, ubahTeks, ubahTipeTrx, type Data, type Seq,
@@ -14,12 +14,16 @@ export type Input = {
   ket2: string; ket3: string; jumlah: number; harga: number;
 };
 
-// Satu-satunya tempat data aplikasi hidup. Komponen hanya membaca data dan memanggil aksi di sini.
-export function useStore() {
-  const [opsi, setOpsi] = useLocal<Opsi[]>("bk-opsi", SEED);
-  const [trx, setTrx] = useLocal<Transaksi[]>("bk-induk", []);
-  const [turunan, setTurunan] = useLocal<Turunan[]>("bk-turunan", []);
-  const [seq, setSeq] = useLocal<Seq>("bk-seq2", {});
+type Slot<T> = readonly [T, Dispatch<SetStateAction<T>>];
+export type Sumber = { opsi: Slot<Opsi[]>; trx: Slot<Transaksi[]>; turunan: Slot<Turunan[]>; seq: Slot<Seq> };
+
+// Satu-satunya tempat logika data aplikasi. Komponen hanya membaca data dan memanggil aksi di sini.
+// Tempat data disimpan (database akun) disediakan lewat `sumber`.
+export function useStore(sumber: Sumber) {
+  const [opsi, setOpsi] = sumber.opsi;
+  const [trx, setTrx] = sumber.trx;
+  const [turunan, setTurunan] = sumber.turunan;
+  const [seq, setSeq] = sumber.seq;
 
   // Rapikan data dari versi lama (singkatan kode, id pilihan pada transaksi)
   useEffect(() => {

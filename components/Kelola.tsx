@@ -47,7 +47,7 @@ export default function Kelola(p: {
   return (
     <Modal title={`Kelola ${LEVEL_LABEL[p.level]}`} subtitle={p.parentLabel ? `Untuk: ${p.parentLabel}` : undefined} onClose={p.onClose}>
       <div className="flex flex-wrap gap-2">
-        <input className={`${box} min-w-0 flex-1`} placeholder={`Tambah ${LEVEL_LABEL[p.level]} baru`} value={nama}
+        <input maxLength={200} className={`${box} min-w-0 flex-1`} placeholder={`Tambah ${LEVEL_LABEL[p.level]} baru`} value={nama}
           onChange={(e) => { setNama(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && tambah()} />
         {p.level === "akun" && <TipeSelect value={tipe} onChange={setTipe} />}
         <button onClick={tambah} className="press inline-flex items-center gap-1 rounded-xl bg-teal-700 px-3 py-2.5 text-sm font-semibold text-white hover:bg-teal-800">
@@ -67,7 +67,7 @@ export default function Kelola(p: {
         {p.items.length === 0 && <li className="text-sm text-slate-700">Belum ada pilihan. Tambahkan di atas.</li>}
         {p.items.map((i) => (
           <li key={i.id} className="anim-up flex items-center gap-2">
-            <input className={`${box} min-w-0 flex-1`} defaultValue={i.nama} aria-label="Ubah nama"
+            <input maxLength={200} className={`${box} min-w-0 flex-1`} defaultValue={i.nama} aria-label="Ubah nama"
               onBlur={(e) => {
                 const v = e.target.value.trim();
                 if (!v || v === i.nama) { e.target.value = i.nama; return; }

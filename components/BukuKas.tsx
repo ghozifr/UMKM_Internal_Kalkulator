@@ -2,8 +2,10 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Download, Layers, ListTree, PencilLine, Table2, TrendingDown, TrendingUp, Upload, Wallet, type LucideIcon } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
+import { AlertTriangle, BookOpen, Check, CloudUpload, Download, Layers, ListTree, Loader2, LogOut, PencilLine, Table2, TrendingDown, TrendingUp, Upload, Wallet, type LucideIcon } from "lucide-react";
 import { useStore } from "@/lib/store";
+import type { Cloud } from "@/lib/useCloudData";
 import { daftar, type Data } from "@/lib/data";
 import type { Level, Transaksi } from "@/lib/types";
 import FormCatat from "./FormCatat";
@@ -27,8 +29,9 @@ const TABS: { k: TabKey; full: string; short: string; Icon: LucideIcon; load?: (
   { k: "turunan", full: "Tabel Turunan", short: "Turunan", Icon: Layers, load: loadTurunan },
 ];
 
-export default function BukuKas() {
-  const s = useStore();
+export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: Cloud; onKeluar: () => Promise<void> }) {
+  const s = useStore(cloud.src);
+  const [keluar, setKeluar] = useState(false);
   const [tab, setTab] = useState<TabKey>("input");
   // Tab dibuat saat pertama dibuka lalu dipertahankan, jadi filter dan pilihan Anda tidak hilang saat pindah tab.
   const [dibuka, setDibuka] = useState<ReadonlySet<TabKey>>(new Set(["input"]));
@@ -94,6 +97,15 @@ export default function BukuKas() {
     setImpor(null);
   };
 
+  const proses = async () => {
+    setKeluar(true);
+    const aman = await cloud.simpanSekarang();
+    if (!aman && !confirm("Ada perubahan yang belum tersimpan ke server dan akan hilang. Tetap keluar?")) { setKeluar(false); return; }
+    await onKeluar();
+  };
+  const usaha = typeof user.user_metadata?.nama_usaha === "string" ? user.user_metadata.nama_usaha : "";
+  const sy = cloud.simpan;
+
   const ringkasan = [
     { l: "Total Pemasukan", v: s.total.masuk, i: <TrendingUp size={20} />, c: "bg-emerald-100 text-emerald-800" },
     { l: "Total Pengeluaran", v: s.total.keluar, i: <TrendingDown size={20} />, c: "bg-rose-100 text-rose-800" },
@@ -110,12 +122,34 @@ export default function BukuKas() {
             <p className="text-sm text-slate-700">Catat transaksi, kumpulkan di Tabel Induk, lalu lihat per Sub Akun atau buat Tabel Turunan.</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="mr-1 text-right text-xs leading-tight text-slate-700">
+            <p className="max-w-[14rem] truncate font-semibold text-slate-900" title={user.email}>{usaha || user.email}</p>
+            <p aria-live="polite" className={`mt-0.5 inline-flex items-center gap-1 ${sy.s === "gagal" ? "text-rose-800" : "text-slate-700"}`}>
+              {sy.s === "tersimpan" && <><Check size={13} className="text-emerald-700" /> Tersimpan di akun</>}
+              {sy.s === "menyimpan" && <><Loader2 size={13} className="animate-spin" /> Menyimpan…</>}
+              {sy.s === "gagal" && <><CloudUpload size={13} /> Belum tersimpan</>}
+            </p>
+          </div>
           <button className={btn2} onClick={cadangkan}><Download size={16} /> Cadangkan Data</button>
           <button className={btn2} onClick={() => fileRef.current?.click()}><Upload size={16} /> Impor Data</button>
           <input ref={fileRef} type="file" accept=".bkas,.json,.gz" className="hidden" onChange={(e) => pilihFile(e.target.files?.[0])} />
+          <button className={btn2} onClick={proses} disabled={keluar}><LogOut size={16} /> Keluar</button>
         </div>
       </header>
+
+      {sy.s === "gagal" && (
+        <div role="alert" className="anim-up mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-950">
+          <AlertTriangle className="shrink-0" size={20} />
+          <p className="min-w-0 flex-1">{sy.pesan}{!sy.bentrok && " Data tetap aman di layar ini dan dicoba disimpan lagi otomatis."}</p>
+          <button className={btn2} onClick={cloud.coba}>Coba lagi</button>
+          {sy.bentrok && (
+            <button className={btn2} onClick={() => { if (confirm("Perubahan yang belum tersimpan di layar ini akan dibuang dan diganti data dari server. Lanjutkan?")) void cloud.ambilDariServer(); }}>
+              Muat ulang dari server
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {ringkasan.map((x, i) => (
@@ -179,6 +213,20 @@ export default function BukuKas() {
           <div className="mt-4 flex flex-wrap gap-2">
             <button className={btn} onClick={() => terapkan("gabung")}>Gabungkan</button>
             <button className={btn2} onClick={() => terapkan("ganti")}>Ganti Semua</button>
+          </div>
+        </Modal>
+      )}
+
+      {cloud.lama && (
+        <Modal title="Data lama ditemukan" subtitle="Ada data buku kas yang tersimpan di browser ini sebelum Anda memakai akun." onClose={cloud.lewati}>
+          <ul className="space-y-1 text-sm text-slate-800">
+            <li><b>{cloud.lama.trx.length}</b> transaksi</li>
+            <li><b>{cloud.lama.turunan.length}</b> tabel turunan</li>
+          </ul>
+          <p className="mt-3 text-sm text-slate-700">Pindahkan ke akun ini agar bisa dibuka dari perangkat mana pun? Data lama di browser tidak dihapus.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button className={btn} onClick={() => { cloud.pindahkan(); setInfo("Data lama dipindahkan ke akun Anda."); }}>Pindahkan ke akun</button>
+            <button className={btn2} onClick={cloud.lewati}>Mulai dari kosong</button>
           </div>
         </Modal>
       )}
