@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { KODE_RE } from "./kode";
+import { normalisasiPers, PERS_KOSONG, type Pers } from "./persediaan";
 import type { Opsi, Transaksi, Turunan } from "./types";
 
 /* =====================================================================
@@ -31,12 +32,14 @@ export const SPEK_OPSI: Spek<Opsi> = {
     kode: o.kode && KODE_RE.test(o.kode) ? o.kode : null,
     parent_id: o.parentId ?? null,
     tipe: o.level === "akun" ? o.tipe ?? "keluar" : null,
+    produksi: o.level === "akun" && o.produksi === true,
   }),
   dari: (b) => {
     const o: Opsi = { id: b.id as string, level: b.level as Opsi["level"], nama: b.nama as string };
     if (b.kode) o.kode = b.kode as string;
     if (b.parent_id) o.parentId = b.parent_id as string;
     if (b.tipe) o.tipe = b.tipe as Opsi["tipe"];
+    if (b.produksi === true) o.produksi = true;
     return o;
   },
 };
@@ -73,6 +76,27 @@ export const SPEK_SEQ: Spek<Nomor> = {
   id: (n) => n.id,
   ke: (n) => ({ id: n.id, nomor: Math.max(0, Math.trunc(Number(n.nomor) || 0)) }),
   dari: (b) => ({ id: b.id as string, nomor: Number(b.nomor) }),
+};
+
+// Pengaturan dan data persediaan disimpan sebagai satu dokumen JSON per akun.
+export type DokPers = { id: string; data: Pers };
+const urut = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(urut)
+    : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, urut((v as Record<string, unknown>)[k])]))
+    : v;
+export const SPEK_PERS: Spek<DokPers> = {
+  tabel: "persediaan",
+  id: (d) => d.id,
+  // Kunci diurutkan karena jsonb di database tidak mempertahankan urutan kunci; tanpa ini setiap muat dianggap berubah.
+  ke: (d) => ({ id: d.id, data: urut(d.data) }),
+  dari: (b) => ({ id: b.id as string, data: normalisasiPers(b.data) }),
+};
+const DOK = new WeakMap<Pers, DokPers>();
+const dokPers = (p: Pers): DokPers[] => {
+  if (p === PERS_KOSONG) return [];
+  let d = DOK.get(p);
+  if (!d) DOK.set(p, (d = { id: "data", data: p }));
+  return [d];
 };
 
 /* ---------- Mesin sinkronisasi ---------- */
@@ -116,16 +140,17 @@ export class Sinkron {
 
   // Membaca semua tabel dari server. Belum mengubah apa pun di mesin ini; panggil adopsi() untuk memakainya.
   async ambil() {
-    const [opsi, trx, turunan, seq] = await Promise.all([
+    const [opsi, trx, turunan, seq, pers] = await Promise.all([
       this.ambilTabel(SPEK_OPSI), this.ambilTabel(SPEK_TRX), this.ambilTabel(SPEK_TURUNAN), this.ambilTabel(SPEK_SEQ),
+      this.ambilTabel(SPEK_PERS),
     ]);
-    return { opsi, trx, turunan, seq };
+    return { opsi, trx, turunan, seq, pers };
   }
 
   adopsi(h: Awaited<ReturnType<Sinkron["ambil"]>>) {
     this.tahu = new Map([
       [SPEK_OPSI.tabel, h.opsi.tahu], [SPEK_TRX.tabel, h.trx.tahu],
-      [SPEK_TURUNAN.tabel, h.turunan.tahu], [SPEK_SEQ.tabel, h.seq.tahu],
+      [SPEK_TURUNAN.tabel, h.turunan.tahu], [SPEK_SEQ.tabel, h.seq.tahu], [SPEK_PERS.tabel, h.pers.tahu],
     ]);
     for (const t of this.tahu.values()) for (const v of t.values()) this.maks = Math.max(this.maks, v.urut);
   }
@@ -138,7 +163,8 @@ export class Sinkron {
       return false;
     };
     return bandingkan(this.tahu.get("opsi"), h.opsi.tahu) || bandingkan(this.tahu.get("transaksi"), h.trx.tahu)
-      || bandingkan(this.tahu.get("turunan"), h.turunan.tahu) || bandingkan(this.tahu.get("urutan_kode"), h.seq.tahu);
+      || bandingkan(this.tahu.get("turunan"), h.turunan.tahu) || bandingkan(this.tahu.get("urutan_kode"), h.seq.tahu)
+      || bandingkan(this.tahu.get("persediaan"), h.pers.tahu);
   }
 
   private urutBaru() {
@@ -175,12 +201,13 @@ export class Sinkron {
     return { hapus, item: [...ubah, ...baru] };
   }
 
-  rencana(d: { opsi: readonly Opsi[]; trx: readonly Transaksi[]; turunan: readonly Turunan[]; seq: Record<string, number> }): Rencana {
+  rencana(d: { opsi: readonly Opsi[]; trx: readonly Transaksi[]; turunan: readonly Turunan[]; seq: Record<string, number>; pers: Pers }): Rencana {
     const s = [
       { tabel: "opsi", ...this.selisih(SPEK_OPSI, d.opsi) },
       { tabel: "transaksi", ...this.selisih(SPEK_TRX, d.trx) },
       { tabel: "turunan", ...this.selisih(SPEK_TURUNAN, d.turunan) },
       { tabel: "urutan_kode", ...this.selisih(SPEK_SEQ, Object.entries(d.seq).map(([id, nomor]) => ({ id, nomor }))) },
+      { tabel: "persediaan", ...this.selisih(SPEK_PERS, dokPers(d.pers)) },
     ];
     return {
       hapus: s.map((x) => ({ tabel: x.tabel, ids: x.hapus })),

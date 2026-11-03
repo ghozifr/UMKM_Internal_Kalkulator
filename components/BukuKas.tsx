@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AlertTriangle, BookOpen, Check, CloudUpload, Download, Layers, ListTree, Loader2, LogOut, PencilLine, Table2, TrendingDown, TrendingUp, Upload, Wallet, type LucideIcon } from "lucide-react";
+import { AlertTriangle, BookOpen, Boxes, Check, CloudUpload, Download, Factory, Layers, ListTree, Loader2, LogOut, PencilLine, Table2, TrendingDown, TrendingUp, Upload, Wallet, type LucideIcon } from "lucide-react";
 import { useStore } from "@/lib/store";
 import type { Cloud } from "@/lib/useCloudData";
 import { daftar, type Data } from "@/lib/data";
@@ -16,23 +16,29 @@ import { Angka, btn, btn2, card } from "./ui";
 const loadInduk = () => import("./TabInduk");
 const loadSub = () => import("./TabSubAkun");
 const loadTurunan = () => import("./TabTurunan");
+const loadProduksi = () => import("./TabProduksi");
+const loadPers = () => import("./TabPersediaan");
 const TabInduk = dynamic(loadInduk);
 const TabSubAkun = dynamic(loadSub);
 const TabTurunan = dynamic(loadTurunan);
+const TabProduksi = dynamic(loadProduksi);
+const TabPersediaan = dynamic(loadPers);
 const Kelola = dynamic(() => import("./Kelola"));
 
-type TabKey = "input" | "induk" | "sub" | "turunan";
+type TabKey = "input" | "induk" | "sub" | "turunan" | "produksi" | "persediaan";
 const TABS: { k: TabKey; full: string; short: string; Icon: LucideIcon; load?: () => unknown }[] = [
   { k: "input", full: "Catat Transaksi", short: "Catat", Icon: PencilLine },
   { k: "induk", full: "Tabel Induk", short: "Induk", Icon: Table2, load: loadInduk },
   { k: "sub", full: "Tabel Sub Akun", short: "Sub Akun", Icon: ListTree, load: loadSub },
   { k: "turunan", full: "Tabel Turunan", short: "Turunan", Icon: Layers, load: loadTurunan },
+  { k: "produksi", full: "Tabel Produksi", short: "Produksi", Icon: Factory, load: loadProduksi },
+  { k: "persediaan", full: "Persediaan", short: "Stok", Icon: Boxes, load: loadPers },
 ];
 
 export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: Cloud; onKeluar: () => Promise<void> }) {
   const s = useStore(cloud.src);
   const [keluar, setKeluar] = useState(false);
-  const [tab, setTab] = useState<TabKey>("input");
+  const [tabDipilih, setTab] = useState<TabKey>("input");
   // Tab dibuat saat pertama dibuka lalu dipertahankan, jadi filter dan pilihan Anda tidak hilang saat pindah tab.
   const [dibuka, setDibuka] = useState<ReadonlySet<TabKey>>(new Set(["input"]));
   const [kelola, setKelola] = useState<{ level: Level; parentId?: string } | null>(null);
@@ -69,8 +75,13 @@ export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: 
     buka("turunan");
   }, [buatTurunan, buka]);
 
+  // Tab Produksi hanya muncul bila ada Akun yang ditandai sebagai akun produksi
+  const adaProduksi = useMemo(() => s.opsi.some((o) => o.level === "akun" && o.produksi), [s.opsi]);
+  const tabs = useMemo(() => TABS.filter((x) => x.k !== "produksi" || adaProduksi), [adaProduksi]);
+  const tab = tabs.some((x) => x.k === tabDipilih) ? tabDipilih : "input";
+
   const jmlSub = useMemo(() => s.opsi.reduce((n, o) => n + (o.level === "subAkun" ? 1 : 0), 0), [s.opsi]);
-  const hitungTab: Record<TabKey, number | undefined> = { input: undefined, induk: s.trx.length, sub: jmlSub, turunan: s.turunan.length };
+  const hitungTab: Record<TabKey, number | undefined> = { input: undefined, induk: s.trx.length, sub: jmlSub, turunan: s.turunan.length, produksi: undefined, persediaan: undefined };
 
   /* ---------- Cadangkan & impor data ---------- */
   const cadangkan = async () => {
@@ -161,10 +172,10 @@ export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: 
       </div>
 
       <nav className="sticky top-2 z-10 mb-5 rounded-2xl border border-slate-200 bg-white/85 p-1.5 shadow-sm backdrop-blur">
-        <div className="relative grid grid-cols-4">
-          <span aria-hidden className="absolute inset-y-0 left-0 w-1/4 rounded-xl bg-teal-700 shadow-md transition-transform duration-300 ease-out"
-            style={{ transform: `translateX(${TABS.findIndex((x) => x.k === tab) * 100}%)` }} />
-          {TABS.map(({ k, full, short, Icon, load }) => (
+        <div className="relative grid" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+          <span aria-hidden className="absolute inset-y-0 left-0 rounded-xl bg-teal-700 shadow-md transition-transform duration-300 ease-out"
+            style={{ width: `${100 / tabs.length}%`, transform: `translateX(${tabs.findIndex((x) => x.k === tab) * 100}%)` }} />
+          {tabs.map(({ k, full, short, Icon, load }) => (
             <button key={k} onClick={() => buka(k)} onPointerEnter={load} onFocus={load} aria-current={tab === k}
               className={`relative z-10 flex flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-2 text-xs font-semibold transition-colors sm:flex-row sm:gap-2 sm:px-2 sm:py-2.5 sm:text-sm ${tab === k ? "text-white" : "text-slate-700 hover:text-slate-900"}`}>
               <Icon size={16} className="shrink-0" />
@@ -199,6 +210,17 @@ export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: 
         </div>
       )}
 
+      {dibuka.has("produksi") && adaProduksi && (
+        <div hidden={tab !== "produksi"}>
+          <TabProduksi opsi={s.opsi} trx={s.trx} baru={baru} onHapus={hapusKonfirm} />
+        </div>
+      )}
+      {dibuka.has("persediaan") && (
+        <div hidden={tab !== "persediaan"}>
+          <TabPersediaan pers={s.pers} setPers={s.setPers} trx={s.trx} opsi={s.opsi} idx={s.idx} />
+        </div>
+      )}
+
       {impor && (
         <Modal title="Impor Data" subtitle="File cadangan berhasil dibaca." onClose={() => setImpor(null)}>
           <ul className="space-y-1 text-sm text-slate-800">
@@ -208,7 +230,7 @@ export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: 
           </ul>
           <p className="mt-3 text-sm text-slate-700">
             <b>Gabungkan</b> menambahkan data dari file tanpa menghapus data sekarang (kode yang bentrok diberi nomor baru).{" "}
-            <b>Ganti Semua</b> menghapus data sekarang dan memakai isi file.
+            <b>Ganti Semua</b> menghapus data sekarang dan memakai isi file. Pengaturan Persediaan dari file hanya dipakai bila Persediaan Anda masih kosong.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button className={btn} onClick={() => terapkan("gabung")}>Gabungkan</button>
@@ -234,9 +256,9 @@ export default function BukuKas({ user, cloud, onKeluar }: { user: User; cloud: 
       {kelola && (
         <Kelola level={kelola.level} parentLabel={kelola.parentId ? s.idx.byId.get(kelola.parentId)?.nama : undefined}
           items={daftar(s.idx, kelola.level, kelola.parentId)}
-          onAdd={(nama, tipe) => s.tambahOpsi(kelola.level, kelola.parentId, nama, tipe)}
+          onAdd={(nama, tipe, produksi) => s.tambahOpsi(kelola.level, kelola.parentId, nama, tipe, produksi)}
           onRename={(id, nama) => s.ubahNama(kelola.level, id, nama)}
-          onKode={s.ubahKode} onTipe={s.ubahTipe} onDelete={s.hapusOpsi} onClose={() => setKelola(null)} />
+          onKode={s.ubahKode} onTipe={s.ubahTipe} onProduksi={s.ubahProduksi} onDelete={s.hapusOpsi} onClose={() => setKelola(null)} />
       )}
 
       {info && (

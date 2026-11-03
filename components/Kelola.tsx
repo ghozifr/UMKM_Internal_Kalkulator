@@ -24,15 +24,17 @@ export default function Kelola(p: {
   level: Level;
   parentLabel?: string;
   items: readonly Opsi[];
-  onAdd: (nama: string, tipe: Tipe) => void;
+  onAdd: (nama: string, tipe: Tipe, produksi: boolean) => void;
   onRename: (id: string, nama: string) => void;
   onKode: (id: string, kode: string) => void;
   onTipe: (id: string, tipe: Tipe) => void;
+  onProduksi: (id: string, produksi: boolean) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }) {
   const [nama, setNama] = useState("");
   const [tipe, setTipe] = useState<Tipe>("masuk");
+  const [produksi, setProduksi] = useState(false);
   const [err, setErr] = useState("");
   const berkode = BERKODE.includes(p.level);
 
@@ -40,8 +42,8 @@ export default function Kelola(p: {
     const v = nama.trim();
     if (!v) return;
     if (ada(p.items, v)) return setErr(`"${v}" sudah ada.`);
-    p.onAdd(v, tipe);
-    setNama(""); setErr("");
+    p.onAdd(v, tipe, produksi);
+    setNama(""); setErr(""); setProduksi(false);
   };
 
   return (
@@ -54,13 +56,19 @@ export default function Kelola(p: {
           <Plus size={16} /> Tambah
         </button>
       </div>
+      {p.level === "akun" && (
+        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-800">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-teal-700" checked={produksi} onChange={(e) => setProduksi(e.target.checked)} />
+          <span><b>Akun produksi.</b> Akun ini otomatis punya tabel produksi sendiri, dan formulirnya hanya menerima <b>angka</b> di Keterangan 2 (jumlah produksi).</span>
+        </label>
+      )}
       {err && <p className="anim-fade mt-2 text-sm font-semibold text-rose-800" role="alert">{err}</p>}
 
       {berkode && p.items.length > 0 && (
         <div className="mt-4 flex gap-2 pr-11 text-sm font-semibold text-slate-800">
           <span className="flex-1">Nama</span>
           <span className="w-24">Kode</span>
-          {p.level === "akun" && <span className="w-36">Jenis</span>}
+          {p.level === "akun" && <><span className="w-36">Jenis</span><span className="w-20">Produksi</span></>}
         </div>
       )}
       <ul className={`${berkode ? "mt-1" : "mt-4"} space-y-2`}>
@@ -90,6 +98,12 @@ export default function Kelola(p: {
                 onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
             )}
             {p.level === "akun" && <TipeSelect value={i.tipe ?? "keluar"} onChange={(t) => p.onTipe(i.id, t)} />}
+            {p.level === "akun" && (
+              <label className="flex w-20 items-center justify-center" title="Akun produksi: Keterangan 2 wajib angka">
+                <input type="checkbox" className="h-5 w-5 accent-teal-700" checked={!!i.produksi} aria-label={`Akun produksi: ${i.nama}`}
+                  onChange={(e) => p.onProduksi(i.id, e.target.checked)} />
+              </label>
+            )}
             <button aria-label={`Hapus ${i.nama}`} className="press rounded-lg p-2 text-slate-600 hover:bg-red-50 hover:text-red-700"
               onClick={() => confirm(`Hapus "${i.nama}"? Pilihan turunannya ikut terhapus. Transaksi lama tetap tersimpan.`) && p.onDelete(i.id)}>
               <Trash2 size={16} />
@@ -99,6 +113,7 @@ export default function Kelola(p: {
       </ul>
       <p className="mt-4 text-sm text-slate-700">
         Ubah nama atau kode langsung di kolom, lalu tekan Enter. Mengganti nama ikut memperbarui transaksi lama.
+        {p.level === "akun" && " Akun produksi: Keterangan 2 diisi angka jumlah produksi, dan datanya dibaca oleh tab Persediaan."}
         {berkode && " Kode dibuat otomatis dari huruf depan nama dan dipakai membentuk kode transaksi. Kode transaksi lama tidak berubah."}
       </p>
     </Modal>

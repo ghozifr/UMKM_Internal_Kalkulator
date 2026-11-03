@@ -3,6 +3,7 @@
 import { memo, useMemo, useState } from "react";
 import { hitung, rupiah } from "@/lib/format";
 import { prefixKode } from "@/lib/kode";
+import { angkaKet2 } from "@/lib/persediaan";
 import { daftar, type Indeks } from "@/lib/data";
 import type { Input } from "@/lib/store";
 import type { Level, Transaksi } from "@/lib/types";
@@ -49,7 +50,13 @@ function FormCatat({ idx, trx, baru, kodeBerikut, simpanTrx, onHapus, onKelola, 
   const total = hitung(form.jumlah, form.harga);
   const prefix = akun && sub ? prefixKode(akun, sub, k1) : "";
   const kode = prefix ? kodeBerikut(prefix).kode : "";
-  const bisa = !!(form.tanggal && akun && sub && kasId && total > 0);
+  // Akun produksi: Keterangan 1 (produk) wajib, Keterangan 2 wajib angka, Jumlah dan Harga boleh kosong
+  const produksi = !!akun?.produksi;
+  const ket2Angka = angkaKet2(form.ket2);
+  const ket2Salah = produksi && form.ket2.trim() !== "" && (ket2Angka === null || ket2Angka <= 0);
+  const bisa = produksi
+    ? !!(form.tanggal && akun && sub && kasId && k1Id && ket2Angka !== null && ket2Angka > 0)
+    : !!(form.tanggal && akun && sub && kasId && total > 0);
 
   const recent = useMemo(() => trx.slice(0, 5), [trx]);
   const saran2 = useMemo(() => saranDari(trx, "ket2"), [trx]);
@@ -63,7 +70,8 @@ function FormCatat({ idx, trx, baru, kodeBerikut, simpanTrx, onHapus, onKelola, 
     });
     if (!t) return;
     onSimpan(`Transaksi ${t.kode} tersimpan di Tabel Induk.`, t.id);
-    setForm({ ...BLANK, tanggal: form.tanggal, kasId });
+    // Akun produksi dicatat berurutan (Adonan, Sale 4.5, ...), jadi Akun dan Sub Akun dipertahankan
+    setForm({ ...BLANK, tanggal: form.tanggal, kasId, ...(produksi ? { akunId, subId } : {}) });
   };
 
   return (
@@ -94,10 +102,13 @@ function FormCatat({ idx, trx, baru, kodeBerikut, simpanTrx, onHapus, onKelola, 
                 onKelola={() => onKelola("ket1", subId)} disabled={!subId} hint="Pilih Sub Akun terlebih dahulu" />
             </div>
             <div className="rounded-xl border border-slate-300 bg-slate-50 p-3">
-              <Lbl t="Keterangan 2">
-                <input className={box} list="saran-ket2" maxLength={120} placeholder="Ketik manual (boleh kosong)"
+              <Lbl t={produksi ? "Keterangan 2: jumlah produksi (angka)" : "Keterangan 2"}>
+                <input className={`${box} ${ket2Salah ? "border-rose-600 ring-2 ring-rose-600/20" : ""}`} list={produksi ? undefined : "saran-ket2"} maxLength={120}
+                  inputMode={produksi ? "decimal" : undefined} aria-invalid={ket2Salah}
+                  placeholder={produksi ? "Contoh: 9 atau 4,5" : "Ketik manual (boleh kosong)"}
                   value={form.ket2} onChange={(e) => set({ ket2: e.target.value })} />
               </Lbl>
+              {ket2Salah && <p role="alert" className="mt-1.5 text-sm font-semibold text-rose-800">Akun produksi hanya menerima angka di sini, contoh 9 atau 4,5 (desimal maksimal 2 digit, tanpa titik ribuan).</p>}
               <datalist id="saran-ket2">{saran2.map((s) => <option key={s} value={s} />)}</datalist>
             </div>
             <div className="rounded-xl border border-slate-300 bg-slate-50 p-3">
@@ -111,6 +122,7 @@ function FormCatat({ idx, trx, baru, kodeBerikut, simpanTrx, onHapus, onKelola, 
         </Seksi>
 
         <Seksi n={3} t="Nominal">
+          {produksi && <p className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-slate-900">Akun produksi: jumlah produksi diisi di Keterangan 2. Jumlah dan Harga boleh dikosongkan.</p>}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Lbl t="Jumlah">
               <input className={box} type="number" inputMode="decimal" min={0} placeholder="0" value={form.jumlah || ""}
@@ -147,7 +159,9 @@ function FormCatat({ idx, trx, baru, kodeBerikut, simpanTrx, onHapus, onKelola, 
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button onClick={simpan} disabled={!bisa} className={btn}>Simpan ke Tabel Induk</button>
-          {!bisa && <p className="text-sm text-slate-700">Lengkapi Tanggal, Akun, Sub Akun, Kas, Jumlah, dan Harga.</p>}
+          {!bisa && <p className="text-sm text-slate-700">
+            {produksi ? "Lengkapi Tanggal, Akun, Sub Akun, Kas, Keterangan 1 (produk), dan Keterangan 2 (angka jumlah produksi)." : "Lengkapi Tanggal, Akun, Sub Akun, Kas, Jumlah, dan Harga."}
+          </p>}
         </div>
       </section>
 

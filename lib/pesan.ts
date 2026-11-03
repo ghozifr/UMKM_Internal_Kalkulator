@@ -26,6 +26,8 @@ export function pesanDb(e: Galat): string {
   if (JARINGAN.test(m))
     return "Tidak dapat terhubung ke server. Periksa internet Anda. Di paket gratis Supabase, proyek dijeda setelah 1 minggu tanpa aktivitas dan perlu diaktifkan lagi dari dashboard.";
   if (c === "23505") return "Kode transaksi bentrok dengan data yang dibuat dari perangkat lain.";
+  if (c === "PGRST204" || /could not find the .* column/i.test(m))
+    return "Database belum diperbarui. Jalankan supabase/migrasi-persediaan.sql di Supabase SQL Editor, lalu muat ulang halaman.";
   if (c === "42P01" || c === "PGRST205" || /could not find the table|does not exist/i.test(m))
     return "Tabel database belum dibuat. Jalankan supabase/schema.sql di Supabase SQL Editor.";
   if (c === "PGRST301" || e?.status === 401 || /jwt/i.test(m)) return "Sesi berakhir. Muat ulang halaman lalu masuk lagi.";

@@ -10,6 +10,7 @@ export type Opsi = {
   kode?: string; // singkatan untuk kode transaksi (hanya Akun, Sub Akun, Keterangan 1)
   parentId?: string;
   tipe?: Tipe; // hanya Akun
+  produksi?: boolean; // hanya Akun: Keterangan 2 wajib angka (jumlah produksi) dan dibaca oleh Persediaan
 };
 
 // Transaksi menyimpan teks agar riwayat tetap utuh walaupun pilihan dihapus.

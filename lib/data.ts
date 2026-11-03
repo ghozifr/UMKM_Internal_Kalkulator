@@ -1,9 +1,10 @@
 import { BERKODE, LEVELS, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
 import { POLA, formatKode, lengkapiKode, nomorTerbesar, singkat } from "./kode";
+import { adaIsi, type Pers } from "./persediaan";
 
 // Nomor urut terakhir per awalan kode, supaya nomor tidak dipakai ulang setelah baris dihapus.
 export type Seq = Record<string, number>;
-export type Data = { opsi: Opsi[]; trx: Transaksi[]; turunan: Turunan[]; seq: Seq };
+export type Data = { opsi: Opsi[]; trx: Transaksi[]; turunan: Turunan[]; seq: Seq; pers: Pers };
 
 export const newId = () => Math.random().toString(36).slice(2, 9);
 
@@ -158,5 +159,9 @@ export function gabung(cur: Data, inc: Data): Data {
     ...cur.turunan,
     ...inc.turunan.filter((x) => !dIds.has(x.id)).map((x) => ({ ...x, kodes: x.kodes.map((k) => ganti.get(k) ?? k) })),
   ];
-  return { opsi, trx: [...baru, ...cur.trx], turunan, seq };
+  // Pengaturan persediaan milik data sekarang tidak ditimpa; dari file hanya dipakai bila persediaan sekarang masih kosong.
+  const pers = adaIsi(cur.pers) ? cur.pers : {
+    ...inc.pers, beli: inc.pers.beli.map((x) => peta.get(x) ?? x), jual: inc.pers.jual.map((x) => peta.get(x) ?? x),
+  };
+  return { opsi, trx: [...baru, ...cur.trx], turunan, seq, pers };
 }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { kosong, Sinkron } from "./cloud";
 import { pesanDb } from "./pesan";
 import { rapikan, type Data, type Seq } from "./data";
+import { PERS_KOSONG, type Pers } from "./persediaan";
 import { SEED, type Opsi, type Transaksi, type Turunan } from "./types";
 
 export type StatusSimpan =
@@ -24,7 +25,7 @@ function bacaLama(): Data | null {
     const ada = trx.length > 0 || turunan.length > 0 || (opsi.length > 0 && JSON.stringify(opsi) !== JSON.stringify(SEED));
     if (!ada) return null;
     const r = rapikan(opsi.length ? opsi : SEED, trx);
-    return { opsi: r.opsi, trx: r.trx, turunan, seq: j<Seq>("bk-seq2", {}) };
+    return { opsi: r.opsi, trx: r.trx, turunan, seq: j<Seq>("bk-seq2", {}), pers: PERS_KOSONG };
   } catch { return null; }
 }
 
@@ -34,6 +35,7 @@ export function useCloudData(db: SupabaseClient, uid: string) {
   const [trx, setTrx] = useState<Transaksi[]>([]);
   const [turunan, setTurunan] = useState<Turunan[]>([]);
   const [seq, setSeq] = useState<Seq>({});
+  const [pers, setPers] = useState<Pers>(PERS_KOSONG);
   const [fase, setFase] = useState<"memuat" | "gagal" | "siap">("memuat");
   const [galat, setGalat] = useState("");
   const [simpan, setSimpan] = useState<StatusSimpan>({ s: "tersimpan" });
@@ -41,8 +43,8 @@ export function useCloudData(db: SupabaseClient, uid: string) {
   const [ulang, setUlang] = useState(0);
 
   const sk = useRef<Sinkron | null>(null);
-  const terbaru = useRef({ opsi, trx, turunan, seq });
-  terbaru.current = { opsi, trx, turunan, seq };
+  const terbaru = useRef({ opsi, trx, turunan, seq, pers });
+  terbaru.current = { opsi, trx, turunan, seq, pers };
   const versi = useRef(0);
   const kotor = useRef(false);
   const jalan = useRef(false);
@@ -100,6 +102,7 @@ export function useCloudData(db: SupabaseClient, uid: string) {
       setTrx(h.trx.items);
       setTurunan(h.turunan.items);
       setSeq(Object.fromEntries(h.seq.items.map((x) => [x.id, x.nomor])));
+      setPers(h.pers.items[0]?.data ?? PERS_KOSONG);
       if (kosongSemua) {
         try { if (!localStorage.getItem(FLAG)) setLama(bacaLama()); } catch {}
       }
@@ -118,7 +121,7 @@ export function useCloudData(db: SupabaseClient, uid: string) {
     versi.current++;
     kotor.current = true;
     if (!jalan.current && gagalBerturut.current === 0) jadwal(TUNDA, () => void tulis());
-  }, [siap, opsi, trx, turunan, seq, jadwal, tulis]);
+  }, [siap, opsi, trx, turunan, seq, pers, jadwal, tulis]);
 
   // Muat ulang dari server (mis. setelah memakai perangkat lain), hanya bila tidak ada perubahan yang belum tersimpan
   const segarkan = useCallback(async (paksa: boolean) => {
@@ -135,6 +138,7 @@ export function useCloudData(db: SupabaseClient, uid: string) {
       gagalBerturut.current = 0;
       setOpsi(h.opsi.items); setTrx(h.trx.items); setTurunan(h.turunan.items);
       setSeq(Object.fromEntries(h.seq.items.map((x) => [x.id, x.nomor])));
+      setPers(h.pers.items[0]?.data ?? PERS_KOSONG);
       if (paksa) { kotor.current = false; setSimpan({ s: "tersimpan" }); }
     } catch (e) {
       if (paksa) setSimpan({ s: "gagal", pesan: pesanDb(e as never), bentrok: false });
@@ -171,15 +175,15 @@ export function useCloudData(db: SupabaseClient, uid: string) {
   const tandai = useCallback(() => { try { localStorage.setItem(FLAG, uid); } catch {} setLama(null); }, [uid]);
   const pindahkan = useCallback(() => {
     if (lama) {
-      setOpsi(lama.opsi); setTrx(lama.trx); setTurunan(lama.turunan); setSeq(lama.seq);
+      setOpsi(lama.opsi); setTrx(lama.trx); setTurunan(lama.turunan); setSeq(lama.seq); setPers(lama.pers);
     }
     tandai();
   }, [lama, tandai]);
 
   const src = useMemo(() => ({
     opsi: [opsi, setOpsi] as const, trx: [trx, setTrx] as const,
-    turunan: [turunan, setTurunan] as const, seq: [seq, setSeq] as const,
-  }), [opsi, trx, turunan, seq]);
+    turunan: [turunan, setTurunan] as const, seq: [seq, setSeq] as const, pers: [pers, setPers] as const,
+  }), [opsi, trx, turunan, seq, pers]);
 
   return {
     fase, galat, simpan, src, lama,

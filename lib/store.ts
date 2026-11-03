@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { hitung } from "./format";
+import { angkaKet2, norm, type Pers } from "./persediaan";
 import { BERKODE, type Level, type Opsi, type Tipe, type Transaksi, type Turunan } from "./types";
 import { formatKode, nomorTerbesar, prefixKode, singkat } from "./kode";
 import {
@@ -15,7 +16,7 @@ export type Input = {
 };
 
 type Slot<T> = readonly [T, Dispatch<SetStateAction<T>>];
-export type Sumber = { opsi: Slot<Opsi[]>; trx: Slot<Transaksi[]>; turunan: Slot<Turunan[]>; seq: Slot<Seq> };
+export type Sumber = { opsi: Slot<Opsi[]>; trx: Slot<Transaksi[]>; turunan: Slot<Turunan[]>; seq: Slot<Seq>; pers: Slot<Pers> };
 
 // Satu-satunya tempat logika data aplikasi. Komponen hanya membaca data dan memanggil aksi di sini.
 // Tempat data disimpan (database akun) disediakan lewat `sumber`.
@@ -24,6 +25,7 @@ export function useStore(sumber: Sumber) {
   const [trx, setTrx] = sumber.trx;
   const [turunan, setTurunan] = sumber.turunan;
   const [seq, setSeq] = sumber.seq;
+  const [pers, setPers] = sumber.pers;
 
   // Rapikan data dari versi lama (singkatan kode, id pilihan pada transaksi)
   useEffect(() => {
@@ -46,13 +48,13 @@ export function useStore(sumber: Sumber) {
   }, [trx]);
 
   /* ---------- Pilihan dropdown ---------- */
-  const tambahOpsi = useCallback((level: Level, parentId: string | undefined, nama: string, tipe: Tipe) => {
+  const tambahOpsi = useCallback((level: Level, parentId: string | undefined, nama: string, tipe: Tipe, produksi = false) => {
     setOpsi((o) => {
       const saudara = o.filter((x) => x.level === level && x.parentId === parentId);
       if (saudara.some((x) => x.nama.toLowerCase() === nama.toLowerCase())) return o;
       const baru: Opsi = { id: newId(), level, nama, parentId };
       if (BERKODE.includes(level)) baru.kode = singkat(nama, new Set(saudara.flatMap((x) => (x.kode ? [x.kode] : []))));
-      if (level === "akun") baru.tipe = tipe;
+      if (level === "akun") { baru.tipe = tipe; if (produksi) baru.produksi = true; }
       return [...o, baru];
     });
   }, [setOpsi]);
@@ -63,7 +65,12 @@ export function useStore(sumber: Sumber) {
     if (daftar(idx, level, cur.parentId).some((x) => x.id !== id && x.nama.toLowerCase() === nama.toLowerCase())) return;
     setOpsi((o) => o.map((x) => (x.id === id ? { ...x, nama } : x)));
     setTrx((t) => ubahTeks(t, level, id, nama));
-  }, [idx, setOpsi, setTrx]);
+    // Barang persediaan dicocokkan lewat nama Keterangan 1, jadi ikut diganti agar tidak terputus dari transaksinya
+    if (level === "ket1" && !opsi.some((x) => x.level === "ket1" && x.id !== id && norm(x.nama) === norm(cur.nama))) {
+      setPers((p) => (p.barang.some((b) => norm(b.nama) === norm(cur.nama))
+        ? { ...p, barang: p.barang.map((b) => (norm(b.nama) === norm(cur.nama) ? { ...b, nama } : b)) } : p));
+    }
+  }, [idx, opsi, setOpsi, setTrx, setPers]);
 
   const ubahKode = useCallback((id: string, kode: string) => {
     setOpsi((o) => o.map((x) => (x.id === id ? { ...x, kode } : x)));
@@ -73,6 +80,10 @@ export function useStore(sumber: Sumber) {
     setOpsi((o) => o.map((x) => (x.id === id ? { ...x, tipe } : x)));
     setTrx((t) => ubahTipeTrx(t, id, tipe));
   }, [setOpsi, setTrx]);
+
+  const ubahProduksi = useCallback((id: string, produksi: boolean) => {
+    setOpsi((o) => o.map((x) => (x.id === id ? { ...x, produksi: produksi || undefined } : x)));
+  }, [setOpsi]);
 
   const hapusOpsi = useCallback((id: string) => setOpsi((o) => hapusCascade(o, id)), [setOpsi]);
 
@@ -88,6 +99,11 @@ export function useStore(sumber: Sumber) {
     const akun = idx.byId.get(f.akunId), sub = idx.byId.get(f.subId), kas = idx.byId.get(f.kasId);
     const k1 = f.k1Id ? idx.byId.get(f.k1Id) : undefined;
     if (!akun || !sub || !kas) return null;
+    // Akun produksi: Keterangan 1 (nama produk) wajib dan Keterangan 2 wajib angka (jumlah produksi)
+    if (akun.produksi) {
+      const q = angkaKet2(f.ket2);
+      if (!k1 || q === null || q <= 0) return null;
+    }
     const prefix = prefixKode(akun, sub, k1);
     const { kode, n } = kodeBerikut(prefix);
     const t: Transaksi = {
@@ -116,16 +132,16 @@ export function useStore(sumber: Sumber) {
   const hapusTurunan = useCallback((id: string) => setTurunan((x) => x.filter((t) => t.id !== id)), [setTurunan]);
 
   /* ---------- Cadangan ---------- */
-  const ambil = useCallback((): Data => ({ opsi, trx, turunan, seq }), [opsi, trx, turunan, seq]);
+  const ambil = useCallback((): Data => ({ opsi, trx, turunan, seq, pers }), [opsi, trx, turunan, seq, pers]);
   const impor = useCallback((inc: Data, mode: "gabung" | "ganti") => {
-    const d = mode === "ganti" ? inc : gabung({ opsi, trx, turunan, seq }, inc);
+    const d = mode === "ganti" ? inc : gabung({ opsi, trx, turunan, seq, pers }, inc);
     const r = rapikan(d.opsi, d.trx);
-    setOpsi(r.opsi); setTrx(r.trx); setTurunan(d.turunan); setSeq(d.seq);
-  }, [opsi, trx, turunan, seq, setOpsi, setTrx, setTurunan, setSeq]);
+    setOpsi(r.opsi); setTrx(r.trx); setTurunan(d.turunan); setSeq(d.seq); setPers(d.pers);
+  }, [opsi, trx, turunan, seq, pers, setOpsi, setTrx, setTurunan, setSeq, setPers]);
 
   return {
-    opsi, trx, turunan, idx, byKode, total,
-    tambahOpsi, ubahNama, ubahKode, ubahTipe, hapusOpsi,
+    opsi, trx, turunan, pers, setPers, idx, byKode, total,
+    tambahOpsi, ubahNama, ubahKode, ubahTipe, ubahProduksi, hapusOpsi,
     kodeBerikut, simpanTrx, hapusTrx,
     buatTurunan, ubahNamaTurunan, keluarkanKode, hapusTurunan,
     ambil, impor,
